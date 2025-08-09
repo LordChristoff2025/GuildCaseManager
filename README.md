@@ -1,4 +1,4 @@
-# GuildCaseManager
+# GuildCaseManager (A Work in Progress)
 A world of Warcraft Addon
 
 Welcome to GuildCaseManager. 
