@@ -3,7 +3,7 @@ A world of Warcraft Addon
 
 Welcome to GuildCaseManager. 
 
-While the code is developed the addon's core functionality resolves around immersion and being able to build case files while in game to support detcetive based RP. 
+An addon brought to life from the player known as Magnussen on Argent Dawn EU, the idea being that a dedicated RP-based addon was needed for in game usage. While systems such as Discord and Google Docs allow users to keep track of events externally, GuildCaseManager provides functionailty while in game. 
 
 # Such as (but not limited to):
 - Cases: Manage investigations and track their progress
