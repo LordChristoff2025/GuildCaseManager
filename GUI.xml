@@ -1,0 +1,21 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- Main Hub Frame -->
+    <Frame name="GCM_MainFrame" parent="UIParent" frameStrata="MEDIUM">
+        <!-- Frame definition with title, close button, etc. -->
+    </Frame>
+    
+    <!-- Cases Management Frame -->
+    <Frame name="GCM_CasesFrame" parent="UIParent" hidden="true">
+        <!-- Cases list and controls -->
+    </Frame>
+    
+    <!-- Case Creation/Edit Frame -->
+    <Frame name="GCM_CaseEditFrame" parent="UIParent" hidden="true">
+        <!-- All case fields and save/cancel buttons -->
+    </Frame>
+    
+    <!-- Case View Frame -->
+    <Frame name="GCM_CaseViewFrame" parent="UIParent" hidden="true">
+        <!-- Display case details -->
+    </Frame>
+</Ui>
