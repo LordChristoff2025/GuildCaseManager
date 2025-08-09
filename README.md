@@ -27,3 +27,7 @@ Open with /acdb or show the welcome message with /acdbw
 - Side buttons have two textures
 - Window can be rezied unproportionally to the content it holds
 - Staff window has intended features missing
+
+# Sidenotes
+
+I'm aware there's no doubt better ways to do stuff in LUA, however I am no expert and it works for now. 
