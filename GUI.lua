@@ -1,3 +1,5 @@
+-- Yes, there's no doubt far better ways of implimenting this but it is what it is. 
+
 local GCM = _G["GuildCaseManager"]
 
 -- Tab-based Main Frame
