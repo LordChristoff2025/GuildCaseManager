@@ -34,4 +34,4 @@ Open with /acdb or show the welcome message with /acdbw
 - The licence reads MIT for Github because Public Domain isn't avalible, however that being said it's free for everyone to do as they wish. Think you can improve or do a better job? Please, go ahead. This is a project made by the community for the benifit of the community. 
 
 ### Disclaimer
-- AI was used to help troubleshoot the LUA (I'm no expert), hence why it's also in the public domain. 
+- AI was used to help troubleshoot the LUA (I'm no expert), hence why it's also in the public domain (The Unlicence). 
