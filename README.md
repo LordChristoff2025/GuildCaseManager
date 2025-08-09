@@ -30,4 +30,5 @@ Open with /acdb or show the welcome message with /acdbw
 
 # Sidenotes
 
-I'm aware there's no doubt better ways to do stuff in LUA, however I am no expert and it works for now. 
+- I'm aware there's no doubt better ways to do stuff in LUA, however I am no expert and it works for now.#
+- The licence reads MIT for Github because Public Domain isn't avalible, however that being said it's free for everyone to do as they wish. Think you can improve or do a better job? Please, go ahead. This is a project made by the community for the benifit of the community. 
