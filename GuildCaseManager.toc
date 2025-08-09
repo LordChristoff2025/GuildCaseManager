@@ -1,0 +1,12 @@
+## Interface: 100105
+## Title: Guild Case Manager
+## Notes: RP Guild Case Management System
+## Author: LordChristoff
+## Version: 2.0
+## SavedVariables: GCM_Database
+
+Core.lua
+Database.lua
+Sync.lua
+TimelineFrame.lua
+GUI.lua
