@@ -1146,14 +1146,22 @@ function GCM.ShowMapFrame()
     GCM.LoadSavedMarkers()
     
     -- Initialize case filter dropdown
-    GCM.UpdateCaseFilterDropdown()
+    GCM.UpdateLinkFilterDropdown()
     
     GCM.MapFrame:Show()
 end
 
 -- This function is now deprecated - use GCM.AddMapMarkerWithCase instead
-function GCM.AddMapMarker(x, y)
-    GCM.AddMapMarkerWithCase(x, y, nil, "")
+function GCM.AddMapMarker(x, y, linkType, linkedId, description)
+    -- This is a deprecated function, redirect to the new one
+    if not linkType then
+        GCM.AddMapMarker(x, y, "Standalone", nil, "")
+    else
+        -- For backward compatibility, if linkType is used as caseId
+        if type(linkType) == "number" or type(linkType) == "string" then
+             GCM.AddMapMarker(x, y, "Case", linkType, linkedId or "")
+        end
+    end
 end
 
 function GCM.ClearAllMarkers()
@@ -1202,7 +1210,7 @@ function GCM.RenumberMarkers()
 end
 
 -- Update the case filter dropdown with available cases
-function GCM.UpdateCaseFilterDropdown()
+function GCM.UpdateLinkFilterDropdown()
     if not GCM.MapFrame or not GCM.MapFrame.caseFilterDropdown then
         return
     end
@@ -1210,7 +1218,8 @@ function GCM.UpdateCaseFilterDropdown()
     local dropdown = GCM.MapFrame.caseFilterDropdown
     
     local function OnClick(self)
-        GCM.MapFrame.selectedFilterCaseId = self.value
+        GCM.MapFrame.selectedFilterId = self.value
+        GCM.MapFrame.selectedFilterType = self.type
         UIDropDownMenu_SetText(dropdown, self:GetText())
         CloseDropDownMenus()
         -- Update lines when case selection changes
@@ -1225,34 +1234,39 @@ function GCM.UpdateCaseFilterDropdown()
         -- All markers option
         info.text = "All Markers"
         info.value = "all"
+        info.type = "all"
         info.func = OnClick
         UIDropDownMenu_AddButton(info)
         
         -- Standalone markers only
         info.text = "Standalone Only"
         info.value = "standalone"
+        info.type = "standalone"
         info.func = OnClick
         UIDropDownMenu_AddButton(info)
         
-        -- Get unique case IDs from current markers
-        local caseIds = {}
-        if GCM.MapFrame.markers then
-            for _, marker in ipairs(GCM.MapFrame.markers) do
-                if marker.caseId and not caseIds[marker.caseId] then
-                    caseIds[marker.caseId] = true
-                end
-            end
+        -- Add cases
+        info.text = "|cff00ccffCases|r"
+        info.isTitle = true
+        UIDropDownMenu_AddButton(info)
+        for _, case in ipairs(GCM_Database.cases or {}) do
+            info.text = string.format("  Case #%s: %s", case.id or "?", case.title or "Untitled")
+            info.value = case.id
+            info.type = "Case"
+            info.func = OnClick
+            UIDropDownMenu_AddButton(info)
         end
         
-        -- Add each case that has markers
-        for caseId, _ in pairs(caseIds) do
-            local case = GCM.GetCase(caseId)
-            if case then
-                info.text = string.format("Case #%s: %s", case.id or "?", case.title or "Untitled")
-                info.value = caseId
-                info.func = OnClick
-                UIDropDownMenu_AddButton(info)
-            end
+        -- Add people
+        info.text = "|cff00ccffPeople|r"
+        info.isTitle = true
+        UIDropDownMenu_AddButton(info)
+        for _, person in ipairs(GCM_Database.people or {}) do
+            info.text = "  " .. (person.name or "Unknown")
+            info.value = person.id
+            info.type = "Person"
+            info.func = OnClick
+            UIDropDownMenu_AddButton(info)
         end
     end
     
@@ -1261,7 +1275,8 @@ function GCM.UpdateCaseFilterDropdown()
     UIDropDownMenu_SetText(dropdown, "All Markers")
     
     -- Set default selection
-    GCM.MapFrame.selectedFilterCaseId = "all"
+    GCM.MapFrame.selectedFilterId = "all"
+    GCM.MapFrame.selectedFilterType = "all"
 end
 
 -- Toggle marker connection lines
@@ -1397,20 +1412,20 @@ function GCM.GetFilteredMarkers()
         return {}
     end
     
-    local selectedFilter = GCM.MapFrame.selectedFilterCaseId or "all"
+    local selectedFilterId = GCM.MapFrame.selectedFilterId or "all"
+    local selectedFilterType = GCM.MapFrame.selectedFilterType or "all"
     local filteredMarkers = {}
     
     for _, marker in ipairs(GCM.MapFrame.markers) do
         if marker and marker:IsShown() then
             local shouldInclude = false
             
-            if selectedFilter == "all" then
+            if selectedFilterType == "all" then
                 shouldInclude = true
-            elseif selectedFilter == "standalone" then
-                shouldInclude = (marker.caseId == nil)
+            elseif selectedFilterType == "standalone" then
+                shouldInclude = (marker.linkType == "Standalone")
             else
-                -- Specific case selected
-                shouldInclude = (marker.caseId == selectedFilter)
+                shouldInclude = (marker.linkType == selectedFilterType and marker.linkedId == selectedFilterId)
             end
             
             if shouldInclude then
@@ -1477,134 +1492,198 @@ function GCM.HideMarkerLines()
 end
 
 -- Show dialog to link marker to case
-function GCM.ShowMarkerCaseDialog(x, y)
-    if not GCM.MarkerCaseDialog then
-        GCM.MarkerCaseDialog = CreateFrame("Frame", "GCM_MarkerCaseDialog", UIParent, "BasicFrameTemplate")
-        GCM.MarkerCaseDialog:SetSize(350, 250)
-        GCM.MarkerCaseDialog:SetPoint("CENTER")
-        GCM.MarkerCaseDialog:SetFrameStrata("DIALOG")
-        GCM.MarkerCaseDialog:SetMovable(true)
-        GCM.MarkerCaseDialog:EnableMouse(true)
-        GCM.MarkerCaseDialog:RegisterForDrag("LeftButton")
-        GCM.MarkerCaseDialog:SetScript("OnDragStart", GCM.MarkerCaseDialog.StartMoving)
-        GCM.MarkerCaseDialog:SetScript("OnDragStop", GCM.MarkerCaseDialog.StopMovingOrSizing)
-        
+-- Show dialog to link marker to an item (case or person)
+function GCM.ShowMarkerDialog(x, y)
+    if not GCM.MarkerDialog then
+        GCM.MarkerDialog = CreateFrame("Frame", "GCM_MarkerDialog", UIParent, "BasicFrameTemplate")
+        GCM.MarkerDialog:SetSize(350, 280) -- Increased height for new dropdown
+        GCM.MarkerDialog:SetPoint("CENTER")
+        GCM.MarkerDialog:SetFrameStrata("DIALOG")
+        GCM.MarkerDialog:SetMovable(true)
+        GCM.MarkerDialog:EnableMouse(true)
+        GCM.MarkerDialog:RegisterForDrag("LeftButton")
+        GCM.MarkerDialog:SetScript("OnDragStart", GCM.MarkerDialog.StartMoving)
+        GCM.MarkerDialog:SetScript("OnDragStop", GCM.MarkerDialog.StopMovingOrSizing)
+
         -- Title
-        local title = GCM.MarkerCaseDialog:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        local title = GCM.MarkerDialog:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         title:SetPoint("TOP", 0, -15)
         title:SetText("Add Map Marker")
+
+        -- Link Type Dropdown
+        local typeLabel = GCM.MarkerDialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        typeLabel:SetPoint("TOPLEFT", 20, -40)
+        typeLabel:SetText("Link Type:")
         
-        -- Instructions
-        local instructions = GCM.MarkerCaseDialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        instructions:SetPoint("TOPLEFT", 20, -40)
-        instructions:SetWidth(310)
-        instructions:SetText("Link this marker to a case (optional):")
-        instructions:SetJustifyH("LEFT")
+        local typeDropdown = CreateFrame("Frame", "GCM_MarkerTypeDropdown", GCM.MarkerDialog, "UIDropDownMenuTemplate")
+        typeDropdown:SetPoint("TOPLEFT", 100, -45)
+        GCM.MarkerDialog.typeDropdown = typeDropdown
+
+        -- Link Item Dropdown
+        local itemLabel = GCM.MarkerDialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        itemLabel:SetPoint("TOPLEFT", 20, -80)
+        itemLabel:SetText("Link To:")
         
-        -- Case dropdown
-        local caseDropdown = CreateFrame("Frame", "GCM_MarkerCaseDropdown", GCM.MarkerCaseDialog, "UIDropDownMenuTemplate")
-        caseDropdown:SetPoint("TOPLEFT", 10, -70)
+        local itemDropdown = CreateFrame("Frame", "GCM_MarkerLinkDropdown", GCM.MarkerDialog, "UIDropDownMenuTemplate")
+        itemDropdown:SetPoint("TOPLEFT", 100, -85)
+        GCM.MarkerDialog.itemDropdown = itemDropdown
         
         -- Description input
-        local descLabel = GCM.MarkerCaseDialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        descLabel:SetPoint("TOPLEFT", 20, -110)
+        local descLabel = GCM.MarkerDialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        descLabel:SetPoint("TOPLEFT", 20, -120)
         descLabel:SetText("Marker Description (optional):")
         
-        local descInput = CreateFrame("EditBox", nil, GCM.MarkerCaseDialog, "InputBoxTemplate")
+        local descInput = CreateFrame("EditBox", nil, GCM.MarkerDialog, "InputBoxTemplate")
         descInput:SetSize(300, 24)
-        descInput:SetPoint("TOPLEFT", 20, -135)
+        descInput:SetPoint("TOPLEFT", 20, -145)
         descInput:SetAutoFocus(false)
         descInput:SetFontObject("GameFontHighlight")
         
         -- Buttons
-        local createBtn = CreateFrame("Button", nil, GCM.MarkerCaseDialog, "UIPanelButtonTemplate")
+        local createBtn = CreateFrame("Button", nil, GCM.MarkerDialog, "UIPanelButtonTemplate")
         createBtn:SetSize(100, 25)
         createBtn:SetPoint("BOTTOMRIGHT", -20, 20)
         createBtn:SetText("Add Marker")
         
-        local cancelBtn = CreateFrame("Button", nil, GCM.MarkerCaseDialog, "UIPanelButtonTemplate")
+        local cancelBtn = CreateFrame("Button", nil, GCM.MarkerDialog, "UIPanelButtonTemplate")
         cancelBtn:SetSize(100, 25)
         cancelBtn:SetPoint("BOTTOMRIGHT", -130, 20)
         cancelBtn:SetText("Cancel")
         
         -- Store references
-        GCM.MarkerCaseDialog.caseDropdown = caseDropdown
-        GCM.MarkerCaseDialog.descInput = descInput
-        GCM.MarkerCaseDialog.createBtn = createBtn
-        GCM.MarkerCaseDialog.cancelBtn = cancelBtn
+        GCM.MarkerDialog.descInput = descInput
+        GCM.MarkerDialog.createBtn = createBtn
+        GCM.MarkerDialog.cancelBtn = cancelBtn
         
         -- Button scripts
         cancelBtn:SetScript("OnClick", function()
-            GCM.MarkerCaseDialog:Hide()
+            GCM.MarkerDialog:Hide()
         end)
         
         createBtn:SetScript("OnClick", function()
-            local selectedCase = GCM.MarkerCaseDialog.selectedCaseId
+            local linkType = GCM.MarkerDialog.selectedLinkType
+            local linkedId = GCM.MarkerDialog.selectedItemId
             local description = descInput:GetText()
-            GCM.AddMapMarkerWithCase(GCM.MarkerCaseDialog.markerX, GCM.MarkerCaseDialog.markerY, selectedCase, description)
-            GCM.MarkerCaseDialog:Hide()
+            GCM.AddMapMarker(GCM.MarkerDialog.markerX, GCM.MarkerDialog.markerY, linkType, linkedId, description)
+            GCM.MarkerDialog:Hide()
         end)
     end
     
     -- Store coordinates
-    GCM.MarkerCaseDialog.markerX = x
-    GCM.MarkerCaseDialog.markerY = y
+    GCM.MarkerDialog.markerX = x
+    GCM.MarkerDialog.markerY = y
     
-    -- Update dropdown with current cases
-    GCM.UpdateMarkerCaseDropdown()
-    
+    -- Initialize and update dropdowns
+    GCM.UpdateMarkerTypeDropdown()
+    GCM.UpdateMarkerLinkDropdown()
+
     -- Clear previous input
-    GCM.MarkerCaseDialog.descInput:SetText("")
-    GCM.MarkerCaseDialog.selectedCaseId = nil
+    GCM.MarkerDialog.descInput:SetText("")
+    GCM.MarkerDialog.selectedLinkType = "Standalone"
+    GCM.MarkerDialog.selectedItemId = nil
     
-    GCM.MarkerCaseDialog:Show()
+    GCM.MarkerDialog:Show()
 end
 
--- Update the case dropdown with available cases
-function GCM.UpdateMarkerCaseDropdown()
-    local dropdown = GCM.MarkerCaseDialog.caseDropdown
+-- Update the marker type dropdown
+function GCM.UpdateMarkerTypeDropdown()
+    local dropdown = GCM.MarkerDialog.typeDropdown
     
     local function OnClick(self)
-        GCM.MarkerCaseDialog.selectedCaseId = self.value
+        GCM.MarkerDialog.selectedLinkType = self.value
+        UIDropDownMenu_SetText(dropdown, self:GetText())
+        CloseDropDownMenus()
+        GCM.UpdateMarkerLinkDropdown() -- Update the items dropdown when the type changes
+    end
+    
+    local function Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        
+        info.text = "Standalone"
+        info.value = "Standalone"
+        info.func = OnClick
+        UIDropDownMenu_AddButton(info)
+        
+        info.text = "Case"
+        info.value = "Case"
+        info.func = OnClick
+        UIDropDownMenu_AddButton(info)
+
+        info.text = "Person"
+        info.value = "Person"
+        info.func = OnClick
+        UIDropDownMenu_AddButton(info)
+    end
+    
+    UIDropDownMenu_Initialize(dropdown, Initialize)
+    UIDropDownMenu_SetWidth(dropdown, 150)
+    UIDropDownMenu_SetText(dropdown, "Standalone")
+end
+
+-- Update the link dropdown with available cases or people
+function GCM.UpdateMarkerLinkDropdown()
+    local dropdown = GCM.MarkerDialog.itemDropdown
+    local linkType = GCM.MarkerDialog.selectedLinkType or "Standalone"
+
+    local function OnClick(self)
+        GCM.MarkerDialog.selectedItemId = self.value
         UIDropDownMenu_SetText(dropdown, self:GetText())
         CloseDropDownMenus()
     end
     
     local function Initialize(self, level)
         local info = UIDropDownMenu_CreateInfo()
-        
-        -- None option
-        info.text = "No case (standalone marker)"
-        info.value = nil
-        info.func = OnClick
-        UIDropDownMenu_AddButton(info)
-        
-        -- Add each case
-        for _, case in ipairs(GCM_Database.cases or {}) do
-            info.text = string.format("Case #%s: %s", case.id or "?", case.title or "Untitled")
-            info.value = case.id
+
+        if linkType == "Case" then
+            info.text = "Select a case..."
+            info.value = nil
             info.func = OnClick
+            UIDropDownMenu_AddButton(info)
+            for _, case in ipairs(GCM_Database.cases or {}) do
+                info.text = string.format("Case #%s: %s", case.id or "?", case.title or "Untitled")
+                info.value = case.id
+                info.func = OnClick
+                UIDropDownMenu_AddButton(info)
+            end
+        elseif linkType == "Person" then
+            info.text = "Select a person..."
+            info.value = nil
+            info.func = OnClick
+            UIDropDownMenu_AddButton(info)
+            for _, person in ipairs(GCM_Database.people or {}) do
+                info.text = person.name or "Unknown"
+                info.value = person.id
+                info.func = OnClick
+                UIDropDownMenu_AddButton(info)
+            end
+        else -- Standalone
+            info.text = "No link"
+            info.value = nil
+            info.disabled = true
             UIDropDownMenu_AddButton(info)
         end
     end
     
     UIDropDownMenu_Initialize(dropdown, Initialize)
-    UIDropDownMenu_SetWidth(dropdown, 300)
-    UIDropDownMenu_SetText(dropdown, "No case (standalone marker)")
+    UIDropDownMenu_SetWidth(dropdown, 200)
+    if linkType == "Case" then
+        UIDropDownMenu_SetText(dropdown, "Select a case...")
+    elseif linkType == "Person" then
+        UIDropDownMenu_SetText(dropdown, "Select a person...")
+    else
+        UIDropDownMenu_SetText(dropdown, "No link")
+    end
 end
 
 -- Get marker color based on case properties
-function GCM.GetMarkerColor(caseId)
-    if not caseId then
-        return {1, 0, 0, 1} -- Red for standalone markers
-    end
-    
-    local case = GCM.GetCase(caseId)
-    if not case then
-        return {0.5, 0.5, 0.5, 1} -- Gray for missing cases
-    end
-    
-    -- Color by priority first (most important)
+function GCM.GetMarkerColor(linkType, linkedId)
+    if linkType == "Case" and linkedId then
+        local case = GCM.GetCase(linkedId)
+        if not case then
+            return {0.5, 0.5, 0.5, 1} -- Gray for missing cases
+        end
+
+        -- Color by priority first (most important)
     if case.priority then
         local priority = string.lower(case.priority)
         if string.find(priority, "critical") or string.find(priority, "urgent") or string.find(priority, "high") then
@@ -1648,6 +1727,11 @@ function GCM.GetMarkerColor(caseId)
     
     -- Default blue for case-linked markers with no specific classification
     return {0, 0.8, 1, 1}
+    elseif linkType == "Person" and linkedId then
+        return {0.8, 0.4, 1, 1} -- Purple for people markers
+    else
+        return {1, 0, 0, 1} -- Red for standalone markers
+    end
 end
 
 -- Show color legend window
@@ -1780,7 +1864,8 @@ function GCM.ShowColorLegend()
 end
 
 -- Enhanced marker creation with case linking
-function GCM.AddMapMarkerWithCase(x, y, caseId, description)
+-- Enhanced marker creation with flexible linking
+function GCM.AddMapMarker(x, y, linkType, linkedId, description)
     local mapContainer, markerContainer, markers, markerLines, showLines
     
     -- Check if we're using the tab-based interface
@@ -1869,7 +1954,8 @@ function GCM.AddMapMarkerWithCase(x, y, caseId, description)
     pin:SetPoint("CENTER", markerContainer, "BOTTOMLEFT", x, markerContainer:GetHeight() - y)
     
     -- Store marker data
-    pin.caseId = caseId
+    pin.linkType = linkType
+    pin.linkedId = linkedId
     pin.description = description or ""
     pin.x = x
     pin.y = y
@@ -1889,7 +1975,8 @@ function GCM.AddMapMarkerWithCase(x, y, caseId, description)
     local markerData = {
         x = relativeX,
         y = relativeY,
-        caseId = caseId,
+        linkType = linkType,
+        linkedId = linkedId,
         description = description or "",
         markerNumber = markerNumber
     }
@@ -1907,7 +1994,7 @@ function GCM.AddMapMarkerWithCase(x, y, caseId, description)
     triangle:SetPoint("CENTER")
     
     -- Get color based on case properties
-    local color = GCM.GetMarkerColor(caseId)
+    local color = GCM.GetMarkerColor(linkType, linkedId)
     triangle:SetColorTexture(color[1], color[2], color[3], color[4])
     
     -- Create triangle shape using 3 small rectangles to form triangle outline
@@ -1947,66 +2034,46 @@ function GCM.AddMapMarkerWithCase(x, y, caseId, description)
     -- Store the marker number for reference
     pin.markerNumber = markerNumber
     
-    -- Enhanced tooltip functionality with case details
+    -- Enhanced tooltip functionality with case/person details
     pin:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
         
-        if self.caseId then
-            local case = GCM.GetCase(self.caseId)
+        if self.linkType == "Case" and self.linkedId then
+            local case = GCM.GetCase(self.linkedId)
             if case then
-                -- Main title
                 GameTooltip:SetText(string.format("|cff00ccff%s|r", case.title or "Untitled Case"), 1, 1, 1)
                 GameTooltip:AddLine(string.format("Case #%s", case.id), 0.8, 0.8, 1)
-                
-                -- Add a separator line
                 GameTooltip:AddLine(" ")
-                
-                -- Case details
                 if case.status and case.status ~= "" then
                     GameTooltip:AddLine(string.format("|cffffcc00Status:|r %s", case.status), 1, 1, 1)
                 end
-                
-                if case.priority and case.priority ~= "" then
-                    GameTooltip:AddLine(string.format("|cffffcc00Priority:|r %s", case.priority), 1, 1, 1)
-                end
-                
-                if case.assignedTo and case.assignedTo ~= "" then
-                    GameTooltip:AddLine(string.format("|cffffcc00Detective:|r %s", case.assignedTo), 1, 1, 1)
-                end
-                
-                if case.location and case.location ~= "" then
-                    GameTooltip:AddLine(string.format("|cffffcc00Location:|r %s", case.location), 1, 1, 1)
-                end
-                
-                -- Brief description if available
-                if case.description and case.description ~= "" then
-                    local briefDesc = case.description
-                    if string.len(briefDesc) > 80 then
-                        briefDesc = string.sub(briefDesc, 1, 77) .. "..."
-                    end
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine(briefDesc, 0.9, 0.9, 0.9)
-                end
-                
             else
                 GameTooltip:SetText("Case Marker (Case Not Found)", 1, 0.5, 0.5)
             end
+        elseif self.linkType == "Person" and self.linkedId then
+            local person = GCM.GetPerson(self.linkedId)
+            if person then
+                GameTooltip:SetText(string.format("|cff00ccff%s|r", person.name or "Unknown Person"), 1, 1, 1)
+                GameTooltip:AddLine(string.format("Person ID: %s", person.id), 0.8, 0.8, 1)
+                GameTooltip:AddLine(" ")
+                if person.occupation and person.occupation ~= "" then
+                    GameTooltip:AddLine(string.format("|cffffcc00Occupation:|r %s", person.occupation), 1, 1, 1)
+                end
+            else
+                GameTooltip:SetText("Person Marker (Person Not Found)", 1, 0.5, 0.5)
+            end
         else
-            GameTooltip:SetText("Map Marker", 1, 1, 1)
+            GameTooltip:SetText("Standalone Marker", 1, 1, 1)
         end
         
-        -- Marker-specific description
         if self.description and self.description ~= "" then
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine(string.format("|cff88ff88Marker Note:|r %s", self.description), 1, 1, 1)
         end
         
-        -- Position and instructions
         GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(string.format("Marker #%d | Position: %.0f, %.0f", self.markerNumber or 0, self.x, self.y), 0.7, 0.7, 0.7)
-        
-        if self.caseId then
-            GameTooltip:AddLine("Left-click to remove | Right-click to view case", 0.5, 0.5, 0.5)
+        if self.linkType == "Case" or self.linkType == "Person" then
+            GameTooltip:AddLine("Left-click to remove | Right-click to view", 0.5, 0.5, 0.5)
         else
             GameTooltip:AddLine("Left-click to remove", 0.5, 0.5, 0.5)
         end
@@ -2054,7 +2121,7 @@ function GCM.AddMapMarkerWithCase(x, y, caseId, description)
                         GCM.UpdateTabMarkerLines()
                     end
                 else
-                    GCM.UpdateCaseFilterDropdown()
+                    GCM.UpdateLinkFilterDropdown()
                     -- Update lines after marker removal
                     if GCM.MapFrame.showLines then
                         GCM.UpdateMarkerLines()
@@ -2062,8 +2129,17 @@ function GCM.AddMapMarkerWithCase(x, y, caseId, description)
                 end
             end
         elseif button == "RightButton" then
-            -- Show marker options
-            GCM.ShowMarkerOptions(self)
+            if self.linkType == "Case" and self.linkedId then
+                local case = GCM.GetCase(self.linkedId)
+                if case then
+                    GCM.ShowCaseViewFrame(case)
+                end
+            elseif self.linkType == "Person" and self.linkedId then
+                local person = GCM.GetPerson(self.linkedId)
+                if person then
+                    GCM.ShowPersonViewFrame(person)
+                end
+            end
         end
     end)
     
@@ -2078,33 +2154,23 @@ function GCM.AddMapMarkerWithCase(x, y, caseId, description)
             GCM.UpdateTabMarkerLines()
         end
     else
-        GCM.UpdateCaseFilterDropdown()
+        GCM.UpdateLinkFilterDropdown()
         -- Update connection lines if they're enabled
         if GCM.MapFrame.showLines then
             GCM.UpdateMarkerLines()
         end
     end
     
-    if caseId then
-        local case = GCM.GetCase(caseId)
+    if linkType == "Case" and linkedId then
+        local case = GCM.GetCase(linkedId)
         local caseTitle = case and case.title or "Unknown Case"
         print(string.format("Marker #%d: Case marker added for '%s' at position: %.0f, %.0f (%.1f%%, %.1f%%)", markerNumber, caseTitle, x, y, relativeX*100, relativeY*100))
+    elseif linkType == "Person" and linkedId then
+        local person = GCM.GetPerson(linkedId)
+        local personName = person and person.name or "Unknown Person"
+        print(string.format("Marker #%d: Person marker added for '%s' at position: %.0f, %.0f (%.1f%%, %.1f%%)", markerNumber, personName, x, y, relativeX*100, relativeY*100))
     else
         print(string.format("Marker #%d: Standalone marker added at position: %.0f, %.0f (%.1f%%, %.1f%%)", markerNumber, x, y, relativeX*100, relativeY*100))
-    end
-end
-
--- Show marker options menu
-function GCM.ShowMarkerOptions(marker)
-    if marker.caseId then
-        local case = GCM.GetCase(marker.caseId)
-        if case then
-            -- Show case view
-            GCM.MapFrame:Hide()
-            GCM.ShowCaseViewFrame(case)
-        else
-            print("Associated case not found!")
-        end
     end
 end
 
@@ -2188,7 +2254,8 @@ function GCM.CreateTabMarkerFromData(markerData)
     local x = markerData.x * mapWidth
     local y = markerData.y * mapHeight
     
-    local caseId = markerData.caseId
+    local linkType = markerData.linkType
+    local linkedId = markerData.linkedId
     local description = markerData.description or ""
     
     local pin = CreateFrame("Button", nil, GCM.MainFrame.tabMapContainer)
@@ -2196,7 +2263,8 @@ function GCM.CreateTabMarkerFromData(markerData)
     pin:SetPoint("CENTER", GCM.MainFrame.tabMapContainer, "BOTTOMLEFT", x, GCM.MainFrame.tabMapContainer:GetHeight() - y)
     
     -- Store marker data
-    pin.caseId = caseId
+    pin.linkType = linkType
+    pin.linkedId = linkedId
     pin.description = description
     pin.x = x
     pin.y = y
@@ -2211,7 +2279,7 @@ function GCM.CreateTabMarkerFromData(markerData)
     triangle:SetPoint("CENTER")
     
     -- Get color based on case properties
-    local color = GCM.GetMarkerColor(caseId)
+    local color = GCM.GetMarkerColor(linkType, linkedId)
     triangle:SetColorTexture(color[1], color[2], color[3], color[4])
     
     -- Create triangle shape using rectangles to form triangle outline
@@ -2391,7 +2459,8 @@ function GCM.CreateMarkerFromData(markerData)
     local x = markerData.x * mapWidth
     local y = markerData.y * mapHeight
     
-    local caseId = markerData.caseId
+    local linkType = markerData.linkType
+    local linkedId = markerData.linkedId
     local description = markerData.description or ""
     
     local pin = CreateFrame("Button", nil, GCM.MapFrame.markerContainer)
@@ -2399,7 +2468,8 @@ function GCM.CreateMarkerFromData(markerData)
     pin:SetPoint("CENTER", GCM.MapFrame.markerContainer, "BOTTOMLEFT", x, GCM.MapFrame.markerContainer:GetHeight() - y)
     
     -- Store marker data
-    pin.caseId = caseId
+    pin.linkType = linkType
+    pin.linkedId = linkedId
     pin.description = description
     pin.x = x
     pin.y = y
@@ -2414,7 +2484,7 @@ function GCM.CreateMarkerFromData(markerData)
     triangle:SetPoint("CENTER")
     
     -- Get color based on case properties
-    local color = GCM.GetMarkerColor(caseId)
+    local color = GCM.GetMarkerColor(linkType, linkedId)
     triangle:SetColorTexture(color[1], color[2], color[3], color[4])
     
     -- Create triangle shape using 3 small rectangles to form triangle outline
