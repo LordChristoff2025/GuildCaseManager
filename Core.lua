@@ -188,6 +188,15 @@ function GCM.GetCase(caseId)
     return nil
 end
 
+function GCM.GetPerson(personId)
+    for _, person in ipairs(GCM_Database.people or {}) do
+        if person.id == personId then
+            return person
+        end
+    end
+    return nil
+end
+
 function GCM.GetCurrentDateTime()
     return date("%Y-%m-%d %H:%M")
 end
